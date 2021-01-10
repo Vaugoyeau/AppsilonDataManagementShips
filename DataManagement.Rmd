@@ -1,0 +1,175 @@
+---
+title: "Data management for Appsilon Ships"
+author: "Marie Vaugoyeau"
+date: "08/01/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Aim  
+  
+Create a shiny app with the Marine data to follow the longest trip of one selected ship with `shiny.semantic`.  
+  
+# Packages used  
+  
+```{r packages_used}
+  
+library(dplyr)
+library(magrittr)
+library(ggplot2)
+library(lubridate)
+library(geosphere)
+
+```
+  
+  
+# Import data  
+  
+```{r import_data}
+  
+ships <- readr::read_csv("raw_data/ships.csv")
+
+ships %>% 
+  glimpse()
+
+```
+  
+# Check data  
+  
+```{r check_data}
+
+ships %>% 
+  nrow()
+
+ships %>% 
+  distinct() %>% 
+  nrow()
+
+# need to delete duplicate data
+ship <- ships %>% 
+  distinct()
+
+ship %>% 
+  count(SHIPNAME, SHIP_ID) %>% 
+  select(SHIPNAME) %>% 
+  count(SHIPNAME) %>% 
+  arrange(desc(n))
+
+```
+  
+Name of ships has not an unique ID... So it is impossible to use Ship Name to identify an unique ship, so user will be used ship id to find the good boat in the app.  
+  
+  
+# Keep only true movement  
+  
+When ships are parked, movement is uninteresting
+  
+```{r need_to_select_only_true_movement}
+
+ship %>% 
+  count(is_parked)
+
+ship %>% 
+  filter(is_parked == 1) %>% 
+  count(SPEED)
+
+ship %>% 
+  filter(is_parked == 0) %>% 
+  ggplot() +
+  aes(x = SPEED) +
+  geom_histogram()
+
+ships_in_movement <- ship %>% 
+  filter(is_parked == 0) %>% 
+  arrange(
+    SHIP_ID,
+    DATETIME
+  )
+
+```
+  
+# Prepare distance calculation  
+  
+New table with arrival and departure point.  
+Distance calculation will only calculated when ship was selected.  
+  
+```{r table_used_in_app}
+
+movement <- bind_cols(
+  ships_in_movement %>% 
+    rename(
+      "latitude_departure" = "LAT",
+      "longitude_departure" = "LON"
+    ),
+  bind_rows(
+    ships_in_movement %>% 
+      slice(-1) %>% 
+      select(
+        "latitude_end" = "LAT",
+        "longitude_end" = "LON",
+        "ship_id_end" = "SHIP_ID"
+    ),
+    tibble(
+      "latitude_end" = 0,
+        "longitude_end" = 0,
+        "ship_id_end" = 0
+    )
+  )
+) %>% 
+  slice(-n()) %>% 
+  mutate(
+    good_ship = 
+      case_when(
+        SHIP_ID == ship_id_end ~ "yes",
+        TRUE ~ "no"
+      )
+  ) %>% 
+  filter(
+    good_ship == "yes"
+  ) %>% 
+  select(
+    - is_parked,
+    - ship_id_end,
+    - good_ship
+  )
+
+## To do in app
+distance <-
+  purrr::map(
+    .x = 1:nrow(movement),
+    .f = ~ distGeo(
+      movement %>% select(longitude_departure, latitude_departure) %>% slice(.x),
+      movement %>% select(longitude_end, latitude_end) %>% slice(.x)
+    ) %>%
+      as_tibble()
+  ) %>%
+  bind_rows() %>%
+  rename(
+    "distance" = "value"
+  )
+
+ship_movement <- 
+  bind_cols(
+    movement,
+    distance
+  )
+
+save(
+  ship_movement,
+  file = "ship_movement.RData"
+)
+
+```
+
+  
+# Traduction from .Rmd to .R  
+  
+```{r traduction_in_r}
+
+# knitr::purl("DataManagement.Rmd", documentation = 2)
+
+```
+  
